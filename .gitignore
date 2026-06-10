@@ -7,3 +7,6 @@ rootfs*.tar
 efi_vars*.fd
 serial*.log
 qemu-stderr.log
+pkgcache/
+SHA256SUMS
+notes.md

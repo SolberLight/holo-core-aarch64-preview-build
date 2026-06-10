@@ -1,0 +1,185 @@
+name: watch-and-release
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'   # probe upstream every 6 hours
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build even if upstream is unchanged
+        type: boolean
+        default: false
+
+concurrency:
+  group: build-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  BASE_IMAGE: registry.gitlab.steamos.cloud/holo/holo-core-aarch64-preview/base:latest
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+      digest: ${{ steps.diff.outputs.digest }}
+      core_db: ${{ steps.diff.outputs.core_db }}
+      extra_db: ${{ steps.diff.outputs.extra_db }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe upstream and compare with state.json
+        id: diff
+        run: |
+          set -e
+          DIGEST=$(docker buildx imagetools inspect "$BASE_IMAGE" --format '{{json .Manifest}}' | jq -r '.digest')
+          echo "container digest: $DIGEST"
+
+          # snapshot URL is discovered during builds and recorded in state.json;
+          # empty on first run (which then always builds)
+          SNAP_URL=$(jq -r '.snapshot_url // empty' state.json)
+          CORE_DB=""; EXTRA_DB=""
+          if [ -n "$SNAP_URL" ]; then
+            CORE_DB=$(curl -fsSL "$SNAP_URL/core/os/aarch64/core.db" | sha256sum | cut -d' ' -f1) || true
+            EXTRA_DB=$(curl -fsSL "$SNAP_URL/extra/os/aarch64/extra.db" | sha256sum | cut -d' ' -f1) || true
+            echo "core.db:  $CORE_DB"
+            echo "extra.db: $EXTRA_DB"
+          fi
+
+          OLD_DIGEST=$(jq -r '.digest // empty' state.json)
+          OLD_CORE=$(jq -r '.core_db // empty' state.json)
+          OLD_EXTRA=$(jq -r '.extra_db // empty' state.json)
+
+          CHANGED=false
+          [ "$DIGEST" != "$OLD_DIGEST" ] && CHANGED=true
+          [ "$CORE_DB" != "$OLD_CORE" ] && CHANGED=true
+          [ "$EXTRA_DB" != "$OLD_EXTRA" ] && CHANGED=true
+          [ "${{ inputs.force }}" = "true" ] && CHANGED=true
+
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "core_db=$CORE_DB" >> "$GITHUB_OUTPUT"
+          echo "extra_db=$EXTRA_DB" >> "$GITHUB_OUTPUT"
+          echo "upstream changed: $CHANGED"
+
+  build:
+    needs: check
+    if: needs.check.outputs.changed == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/hostedtoolcache /usr/share/dotnet \
+                      /opt/ghc /usr/local/.ghcup /usr/local/share/boost || true
+          df -h /
+
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            qemu-system-arm qemu-efi-aarch64 qemu-utils sshpass \
+            parted dosfstools e2fsprogs xz-utils
+
+      - name: Restore package cache
+        uses: actions/cache@v4
+        with:
+          path: pkgcache
+          key: holopkgs-${{ needs.check.outputs.core_db }}-${{ needs.check.outputs.extra_db }}
+          restore-keys: holopkgs-
+
+      - name: Bootstrap rootfs (VM + hardware)
+        run: |
+          mkdir -p pkgcache
+          docker run --rm --privileged \
+            -v "$PWD:/out" -v "$PWD/pkgcache:/rootfs/var/cache/pacman/pkg" \
+            "$BASE_IMAGE" bash /out/bootstrap.sh rootfs.tar
+          docker run --rm --privileged \
+            -v "$PWD:/out" -v "$PWD/pkgcache:/rootfs/var/cache/pacman/pkg" \
+            "$BASE_IMAGE" bash /out/bootstrap.sh rootfs-hw.tar linux-firmware efibootmgr
+          sudo chown -R "$(id -u):$(id -g)" pkgcache
+
+      - name: Assemble disk images
+        run: |
+          sudo bash ./assemble.sh
+          sudo bash ./assemble-hw.sh
+
+      - name: Boot-test VM image
+        run: sudo bash ./ci-boottest.sh
+
+      - name: Boot-test hardware image (SSH probe)
+        run: sudo bash ./ci-hwtest.sh
+
+      - name: Collect release artifacts
+        id: artifacts
+        run: |
+          set -e
+          SERVER=$(docker run --rm "$BASE_IMAGE" grep -m1 '^Server' /etc/pacman.d/mirrorlist | sed 's/^Server *= *//')
+          SNAP_URL="${SERVER%/\$repo/os/\$arch}"
+          SNAPSHOT=$(basename "$SNAP_URL")
+          TAG="build-${SNAPSHOT}-r${GITHUB_RUN_NUMBER}"
+          KVER=$(docker run --rm -v "$PWD:/out" "$BASE_IMAGE" \
+                 bash -c 'tar -tf /out/rootfs.tar ./usr/lib/modules/ | head -2 | tail -1' | cut -d/ -f5)
+
+          sudo xz -T0 -3 /root/holo-build/holo-arm-hw.img
+          sudo mv /root/holo-build/holo-arm-hw.img.xz .
+          sudo chown "$(id -u):$(id -g)" holo-arm-hw.img.xz holo-arm.qcow2
+          sha256sum holo-arm-hw.img.xz holo-arm.qcow2 > SHA256SUMS
+
+          echo "snap_url=$SNAP_URL" >> "$GITHUB_OUTPUT"
+          echo "snapshot=$SNAPSHOT" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "kver=$KVER" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="${{ steps.artifacts.outputs.tag }}"
+          cat > notes.md <<EOF
+          Automated build from Valve's [holo-core-aarch64-preview](${{ steps.artifacts.outputs.snap_url }})
+          package repository, snapshot \`${{ steps.artifacts.outputs.snapshot }}\`,
+          kernel \`${{ steps.artifacts.outputs.kver }}\`.
+          Base container digest: \`${{ needs.check.outputs.digest }}\`
+
+          Both images passed automated boot verification before publishing.
+
+          - \`holo-arm-hw.img.xz\` — flashable raw image for UEFI ARM hardware (8 GiB)
+          - \`holo-arm.qcow2\` — QEMU VM image (16 GiB sparse)
+          - Login: \`root\` / \`holo\` — change it immediately; sshd is enabled
+
+          See the [README](https://github.com/${{ github.repository }}#readme) for
+          install instructions and compatibility notes.
+
+          \`\`\`
+          $(cat SHA256SUMS)
+          \`\`\`
+          EOF
+          gh release create "$TAG" holo-arm-hw.img.xz holo-arm.qcow2 SHA256SUMS \
+            --title "Holo core aarch64 (${{ steps.artifacts.outputs.snapshot }}) — automated build" \
+            --notes-file notes.md
+
+      - name: Update state.json
+        run: |
+          set -e
+          jq -n \
+            --arg digest "${{ needs.check.outputs.digest }}" \
+            --arg snap_url "${{ steps.artifacts.outputs.snap_url }}" \
+            --arg tag "${{ steps.artifacts.outputs.tag }}" \
+            '{digest: $digest, snapshot_url: $snap_url, last_release: $tag}' > state.tmp
+          CORE_DB=$(curl -fsSL "${{ steps.artifacts.outputs.snap_url }}/core/os/aarch64/core.db" | sha256sum | cut -d' ' -f1)
+          EXTRA_DB=$(curl -fsSL "${{ steps.artifacts.outputs.snap_url }}/extra/os/aarch64/extra.db" | sha256sum | cut -d' ' -f1)
+          jq --arg c "$CORE_DB" --arg e "$EXTRA_DB" '. + {core_db: $c, extra_db: $e}' state.tmp > state.json
+          rm state.tmp
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          git commit -m "ci: record upstream state after ${{ steps.artifacts.outputs.tag }}"
+          git push
