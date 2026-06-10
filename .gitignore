@@ -1,0 +1,9 @@
+# build artifacts — everything here contains Valve-built binaries; build locally
+rootfs*.tar
+*.qcow2
+*.img
+*.img.xz
+*.vdi
+efi_vars*.fd
+serial*.log
+qemu-stderr.log
