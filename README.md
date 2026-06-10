@@ -95,6 +95,10 @@ with `xz -T0 holo-arm-hw.img`.
 
 - Login: `root` / `holo` — **change it**. SSH: `ssh -p 2222 root@localhost`.
 - Boot takes ~2–5 minutes under emulation.
+- GUI mode bridges the host clipboard (`qemu-vdagent`); install `spice-vdagent`
+  in the guest to use it. For a desktop, `pacman -S plasma-desktop sddm` +
+  `systemctl enable sddm` works — expect software rendering and low FPS
+  under emulation.
 - `ci-boottest.sh` / `ci-hwtest.sh` are the equivalent checks for Linux/WSL
   and the CI pipeline (the hardware image has no serial console, so it is
   probed over SSH). They exit non-zero unless a login is reached.

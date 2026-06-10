@@ -22,7 +22,7 @@ $qemuArgs = @(
     "-M", "virt",
     "-cpu", "neoverse-n1",
     "-smp", "8",
-    "-m", "4096",
+    "-m", "6144",
     "-accel", "tcg,thread=multi",
     "-drive", "if=pflash,format=raw,readonly=on,file=$qemuDir\share\edk2-aarch64-code.fd",
     "-drive", "if=pflash,format=raw,file=$dir\efi_vars.fd",
@@ -36,7 +36,13 @@ $qemuArgs = @(
 if ($Headless) {
     $qemuArgs += @("-display", "none")
 } else {
-    $qemuArgs += @("-device", "virtio-gpu-pci")
+    # GTK window + host<->guest clipboard bridge (needs spice-vdagent in the guest)
+    $qemuArgs += @(
+        "-device", "virtio-gpu-pci",
+        "-display", "gtk,gl=off",
+        "-chardev", "qemu-vdagent,id=vdagent,name=vdagent,clipboard=on",
+        "-device", "virtserialport,chardev=vdagent,name=com.redhat.spice.0"
+    )
 }
 
 & $qemu @qemuArgs
