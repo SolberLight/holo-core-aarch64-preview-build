@@ -95,8 +95,9 @@ with `xz -T0 holo-arm-hw.img`.
 
 - Login: `root` / `holo` — **change it**. SSH: `ssh -p 2222 root@localhost`.
 - Boot takes ~2–5 minutes under emulation.
-- `wsl-boottest.sh` / `wsl-hwtest.sh` are the equivalent checks run inside WSL
-  (the hardware image has no serial console, so it is probed over SSH).
+- `ci-boottest.sh` / `ci-hwtest.sh` are the equivalent checks for Linux/WSL
+  and the CI pipeline (the hardware image has no serial console, so it is
+  probed over SSH). They exit non-zero unless a login is reached.
 
 ## Installing on an ARM device
 
@@ -120,6 +121,28 @@ Reality check before you flash:
   `linux-firmware`.
 - It cannot be installed on a Steam Frame: the Frame uses a signed,
   device-specific boot chain and kernel, and its Steam/VR UI is not public.
+
+## Automated builds (GitHub Actions)
+
+[`build-release.yml`](.github/workflows/build-release.yml) keeps releases in
+sync with Valve's repositories without any external infrastructure:
+
+- A cron job (every 6 h) probes upstream for changes: the base container's
+  manifest digest (catches new snapshots — the snapshot URL is baked into the
+  container) and the SHA256 of the pacman `core.db`/`extra.db` (catches
+  package updates within a snapshot). Last-seen values live in
+  [`state.json`](state.json), updated by the workflow after each release.
+- On change (or a manual `workflow_dispatch` with `force`), a native
+  **`ubuntu-24.04-arm`** runner rebuilds both images with the exact same
+  scripts documented above — no emulation involved.
+- Both images must pass automated boot verification (`ci-boottest.sh` serial
+  watch + `ci-hwtest.sh` SSH probe) before anything is published.
+- A release tagged `build-<snapshot>-r<run>` is created with the images,
+  `SHA256SUMS`, and provenance (snapshot URL, container digest, kernel
+  version) in the notes, using the built-in `GITHUB_TOKEN`.
+
+If Valve publishes a future preview under a different GitLab path, the
+watcher simply goes quiet — update `BASE_IMAGE` in the workflow.
 
 ## Troubleshooting / hard-won quirks
 
