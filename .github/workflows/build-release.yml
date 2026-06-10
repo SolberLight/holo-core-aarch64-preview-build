@@ -1,6 +1,8 @@
 name: watch-and-release
 
 on:
+  push:
+    branches: [ci-watch-release]   # TEMPORARY: branch testing; remove before merge
   schedule:
     - cron: '17 */6 * * *'   # probe upstream every 6 hours
   workflow_dispatch:
