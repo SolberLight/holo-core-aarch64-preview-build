@@ -7,6 +7,10 @@ into bootable disk images:
 - a **QEMU virtual machine** image you can run on any x86_64 PC (full ARM emulation), and
 - a **flashable raw image** for real ARM hardware (UEFI boot).
 
+Prebuilt images are available on the
+[Releases page](https://github.com/SolberLight/holo-core-aarch64-preview-build/releases);
+the instructions below reproduce them from scratch.
+
 `holo-core-aarch64-preview` is the open-source foundation that SteamOS for ARM
 (the Steam Frame headset OS) is built on: Arch Linux packaging rebuilt for
 `aarch64` by Valve and Collabora, published as a technology preview.
@@ -142,9 +146,10 @@ Reality check before you flash:
 ## Licensing
 
 The scripts in this repository are MIT-licensed (see `LICENSE`).
-The software the built images contain comes from Valve's
-holo-core-aarch64-preview repositories and carries the respective upstream
-licenses (see [Arch Linux RFC 40](https://rfc.archlinux.page/0040-license-package-sources/)
-for the licensing work behind the preview). Build your own images rather than
-redistributing built ones. This project is not affiliated with or endorsed by
-Valve. "Steam", "SteamOS" and "Steam Frame" are trademarks of Valve Corporation.
+The software the built images contain (including the prebuilt release
+images) comes from Valve's holo-core-aarch64-preview repositories and carries
+the respective upstream open-source licenses — see
+[Arch Linux RFC 40](https://rfc.archlinux.page/0040-license-package-sources/)
+for the licensing work that makes the preview's packages redistributable.
+This project is not affiliated with or endorsed by Valve. "Steam", "SteamOS"
+and "Steam Frame" are trademarks of Valve Corporation.
