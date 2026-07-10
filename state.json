@@ -1,7 +1,7 @@
 {
-  "digest": "sha256:edd05b6cf82e4a7f8bab2fb8dd453c45fc44405d7e5a25e36fe229607a224e88",
+  "digest": "sha256:772c5f2a25f158fce68f1047b8e8e0b0d3806da5b32d732fda3b034932946c21",
   "snapshot_url": "https://holo-packages.steamos.cloud/holo-core-aarch64-preview/mash-20251118",
-  "last_release": "build-mash-20251118-r120",
+  "last_release": "build-mash-20251118-r121",
   "core_db": "749c5120622a0218a83259e3d3e0d70383e7e29ff710f419f068024a29aa28e5",
   "extra_db": "cca1ced1cf1eb64c4b507c64b968c7a696fd4f67a546e3f35403d56d6a8bbe05"
 }
